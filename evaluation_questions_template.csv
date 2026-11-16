@@ -1,0 +1,6 @@
+question,subject_code,expected_source_document,expected_page,expected_answer,notes
+What are the units in CSE202?,CSE202,CSE202.pdf,,,,Fill expected answer and page from the actual PDF
+Explain the topics in Unit I of CSE306,CSE306,CSE306.pdf,,,,Fill expected answer and page from the actual PDF
+What are the course outcomes of CSE276?,CSE276,CSE276.pdf,,,,Fill from the actual syllabus
+Which subject includes recurrence relations?,ALL,,,,Verify against all indexed syllabi
+What is the university attendance requirement?,ALL,,,,Should refuse unless an official policy document is indexed
