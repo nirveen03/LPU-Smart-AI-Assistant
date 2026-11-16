@@ -1,100 +1,118 @@
 import streamlit as st
-from rag import answer_question, get_index_status, OLLAMA_MODEL
+from ollama import Client
+from chat_engine import generate, OLLAMA_HOST, OLLAMA_MODEL
+from knowledge import indexed_count
 from subjects import SUBJECTS
 
-st.set_page_config(
-    page_title="LPU Smart AI Assistant",
-    page_icon="🎓",
-    layout="wide",
-)
+st.set_page_config(page_title="LPU Smart AI Assistant", page_icon="🎓", layout="wide")
 
-st.title("🎓 LPU Smart AI Assistant")
-st.caption("Your academic assistant for answers grounded in uploaded university documents.")
-
-with st.sidebar:
-    st.header("Chat settings")
-    selected_subject = st.selectbox(
-        "Choose a subject",
-        options=["ALL"] + list(SUBJECTS.keys()),
-        format_func=lambda code: (
-            "All subjects" if code == "ALL"
-            else f"{code} — {SUBJECTS[code]}"
-        ),
-    )
-    st.divider()
-    st.write("**Knowledge base**")
-    try:
-        chunk_count = get_index_status()
-        st.metric("Indexed text chunks", chunk_count)
-    except Exception as exc:
-        st.warning("Knowledge base is not ready yet.")
-        st.caption(str(exc))
-    st.caption(f"LLM: {OLLAMA_MODEL}")
-    if st.button("Clear conversation"):
-        st.session_state.messages = []
-        st.rerun()
+st.markdown("""
+<style>
+.block-container {max-width: 1050px; padding-top: 2rem;}
+.hero {padding: 1.3rem 1.5rem; border-radius: 18px; background: linear-gradient(120deg,#13243a,#24527a); color:white; margin-bottom:1rem;}
+.hero h1 {color:white; margin:0;}
+.hero p {color:#dce9f5; margin:.35rem 0 0 0;}
+.small-muted {color: #8b95a5; font-size: .85rem;}
+</style>
+""", unsafe_allow_html=True)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-with st.expander("Example questions"):
-    st.markdown(
-        "- What are the units in CSE306?\n"
-        "- Explain Unit IV of CSE202.\n"
-        "- What are the course outcomes of CSE276?\n"
-        "- Which subjects mention graph theory?\n"
-        "- What practicals are listed in the syllabus?"
+with st.sidebar:
+    st.title("🎓 LPU Assistant")
+    st.caption("Hybrid AI + University Knowledge")
+    st.divider()
+    subject = st.selectbox(
+        "Subject filter",
+        ["ALL"] + list(SUBJECTS.keys()),
+        format_func=lambda x: "All subjects" if x == "ALL" else f"{x} — {SUBJECTS[x]}"
     )
+    use_knowledge = st.toggle("Use university knowledge (RAG)", value=True)
+    st.caption("Turn off for general AI conversation.")
+    st.divider()
+    st.subheader("Knowledge base")
+    try:
+        count = indexed_count()
+        st.metric("Indexed text chunks", count)
+        if count == 0:
+            st.info("No PDFs indexed yet. General chat still works.")
+    except Exception:
+        st.info("Knowledge base not initialized. General chat still works.")
+    st.caption(f"AI model: {OLLAMA_MODEL}")
+    if st.button("＋ New chat", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+    st.divider()
+    st.caption("Tip: Add original syllabus PDFs to data/pdfs, then run python ingest.py.")
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        if message.get("sources"):
-            with st.expander("View retrieved sources"):
-                for source in message["sources"]:
-                    st.write(
-                        f"- **{source['subject_code']} — {source['subject_name']}** | "
-                        f"{source['document']}, page {source['page']} "
-                        f"| similarity {source['similarity']}"
-                    )
+st.markdown("""
+<div class="hero">
+  <h1>✨ LPU Smart AI Assistant</h1>
+  <p>Your personal AI study partner — ask, learn, practise and explore.</p>
+</div>
+""", unsafe_allow_html=True)
 
-question = st.chat_input("Ask a question about your LPU subjects...")
+left, right = st.columns([3, 1])
+with left:
+    st.markdown("Ask about your subjects, programming, AI concepts, exam preparation or everyday learning.")
+with right:
+    st.caption("English • Hinglish")
 
-if question:
-    st.session_state.messages.append({"role": "user", "content": question})
+if not st.session_state.messages:
+    st.markdown("#### Try asking")
+    suggestions = [
+        "Explain the OSI model in simple Hinglish",
+        "Create 10 MCQs on Python OOP",
+        "Explain AGI and sustainable AI",
+        "What topics are listed in CSE202 Unit IV?",
+    ]
+    cols = st.columns(2)
+    for i, suggestion in enumerate(suggestions):
+        if cols[i % 2].button(suggestion, use_container_width=True):
+            st.session_state.pending_prompt = suggestion
+            st.rerun()
+
+for item in st.session_state.messages:
+    with st.chat_message(item["role"]):
+        st.markdown(item["content"])
+        if item.get("sources"):
+            with st.expander("📚 Sources used"):
+                for source in item["sources"]:
+                    st.write(f"**{source['subject']}** · {source['file']} · Page {source['page']} · similarity {source['similarity']}")
+        if item.get("mode"):
+            st.caption(item["mode"])
+
+prompt = st.chat_input("Message LPU Smart AI Assistant...")
+if not prompt and "pending_prompt" in st.session_state:
+    prompt = st.session_state.pop("pending_prompt")
+
+if prompt:
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(question)
-
+        st.markdown(prompt)
     with st.chat_message("assistant"):
-        with st.spinner("Searching university documents and preparing an answer..."):
+        with st.spinner("Thinking..."):
             try:
-                result = answer_question(
-                    question,
-                    subject_code=selected_subject,
+                # Keep conversation context bounded for local models.
+                history = st.session_state.messages[-12:]
+                answer, sources, mode = generate(
+                    history, use_knowledge=use_knowledge, subject_code=subject
                 )
-                st.markdown(result["answer"])
-                if result["sources"]:
-                    with st.expander("View retrieved sources"):
-                        for source in result["sources"]:
-                            st.write(
-                                f"- **{source['subject_code']} — {source['subject_name']}** | "
-                                f"{source['document']}, page {source['page']} "
-                                f"| similarity {source['similarity']}"
-                            )
+                st.markdown(answer)
+                if sources:
+                    with st.expander("📚 Sources used"):
+                        for source in sources:
+                            st.write(f"**{source['subject']}** · {source['file']} · Page {source['page']} · similarity {source['similarity']}")
+                st.caption(mode)
                 st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": result["answer"],
-                    "sources": result["sources"],
+                    "role": "assistant", "content": answer,
+                    "sources": sources, "mode": mode
                 })
             except Exception as exc:
-                error_message = (
-                    f"Something went wrong: {exc}\n\n"
-                    "Check that the PDFs are indexed and Ollama is running "
-                    "with the selected model installed."
+                message = (
+                    f"Could not reach the local AI model: `{exc}`\n\n"
+                    "Check that Ollama is installed and running, and that the model is downloaded."
                 )
-                st.error(error_message)
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": error_message,
-                    "sources": [],
-                })
+                st.error(message)
+                st.session_state.messages.append({"role": "assistant", "content": message})
